@@ -1,0 +1,74 @@
+version: 2.1
+orbs:
+  azure-cli: circleci/azure-cli@1.1.0
+  azure-acr: circleci/azure-acr@0.2.1
+  node: circleci/node@5.0.2  
+
+executors:
+  default:
+    docker:
+      - image: alpine:latest
+commands:
+  install_dependencies:
+    steps:
+      - run: apk add openssh sshpass --no-cache
+  ssh_instance:
+    steps:
+      - run:
+          name: SSH into remote instance and deploy latest image from dockerhub
+          command: |
+                  sshpass -p 'ChMrm_pNIEPjL0kS' ssh -o StrictHostKeyChecking=no SC-Login@20.127.42.25 './node-frontend-solution-ssh.sh';
+jobs:
+  build:
+    docker: 
+      - image: cimg/python:3.9
+    steps:
+      - checkout
+      - setup_remote_docker
+      - azure-cli/install
+      - azure-cli/login-with-service-principal
+      - run:
+          name: docker build
+          command: |
+            docker build -t sc-prod-solution-frontend:latest -f application/Env/Prod/Frontend/Dockerfile .
+      - run: 
+          name: push
+          command: |
+            docker login smartcosmosprodregistry.azurecr.io -u SmartCosmosProdRegistry -p DfLpM=7TNbfWPN55df7N0MHrKgYcluDn
+            docker tag sc-prod-solution-frontend:latest smartcosmosprodregistry.azurecr.io/sc-prod-solution-frontend:latest
+            docker push smartcosmosprodregistry.azurecr.io/sc-prod-solution-frontend:latest
+  deploy:
+    executor: default 
+    steps:
+      - install_dependencies
+      - ssh_instance
+                              
+workflows:
+  version: 2.1
+  build_and_deploy:
+    jobs:
+    - build:
+        filters:
+          branches:
+            ignore: /.*/
+          tags:
+             only: /^v[0-9]+(\.[0-9]+)+(\.[0-9]+)-frontend-*.*$/  
+             
+    - hold:
+        type: approval
+        requires:
+          - build
+        filters:
+          branches:
+            ignore: /.*/
+          tags:
+             only: /^v[0-9]+(\.[0-9]+)+(\.[0-9]+)-frontend-*.*$/
+          
+    - deploy:
+         requires:
+            - hold
+         filters:
+           tags:
+              only: /^v[0-9]+(\.[0-9]+)+(\.[0-9]+)-frontend-*.*$/
+           branches:
+             ignore:  /.*/
